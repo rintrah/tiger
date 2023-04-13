@@ -1,0 +1,45 @@
+head	1.1;
+access;
+symbols;
+locks
+	enrique:1.1; strict;
+comment	@# @;
+
+
+1.1
+date	2006.11.16.22.47.44;	author enrique;	state Exp;
+branches;
+next	;
+
+
+desc
+@Signatura de tigerassem
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@signature tigerassem =
+sig
+	 
+		type reg
+		type temp
+		type label
+		datatype instr =OPER of {assem:string,
+														dst:tigertree.temp list,
+														src:tigertree.temp list,
+														jump: tigertemp.label list option} 
+										| LABEL of {assem:string,
+																lab: tigertree.label}
+										| MOVE of {assem:string,
+															dst:tigertree.temp,
+															src:tigertree.temp}
+		val format:(tigertemp.temp->string)->instr->string
+
+end
+	
+
+@

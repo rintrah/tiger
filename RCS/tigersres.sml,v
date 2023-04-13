@@ -1,0 +1,38 @@
+head	1.1;
+access;
+symbols;
+locks
+	enrique:1.1; strict;
+comment	@# @;
+
+
+1.1
+date	2006.10.04.15.59.36;	author enrique;	state Exp;
+branches;
+next	;
+
+
+desc
+@Modulo que especifica el tipo de los elementos del environment
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@structure tigersres =
+struct
+
+open tigerabs
+open tigertab
+open tigertips
+
+datatype EnvEntry =
+	 Var of {ty: Tipo, readOnly: bool, access: unit, level: int}
+	| Func of {level: unit, label:string  (*unit *),
+		formals: Tipo list, result: Tipo, extern: bool}
+
+end
+@

@@ -1,0 +1,61 @@
+head	1.2;
+access;
+symbols;
+locks
+	enrique:1.2; strict;
+comment	@# @;
+
+
+1.2
+date	2006.11.16.22.50.10;	author enrique;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2006.10.23.22.30.32;	author enrique;	state Exp;
+branches;
+next	;
+
+
+desc
+@Primera versión de una pila de labels para tigerseman. Utilizo simplemente listas
+@
+
+
+1.2
+log
+@Versión final (y aceptable) de una pila para Tigerseman y Tigertrans.
+@
+text
+@structure tigerpila :> tigerpila =
+struct
+	type 'a Pila = ('a list) ref 
+	
+
+	fun nuevaPila () = ref []
+	fun nuevaPila1 x = ref [x]
+	fun pushPila x y = x := y::(!x)
+	fun popPila x = x:=List.tl(!x)
+		handle Empty => raise Fail "La pila no tiene más que un elemento"
+	fun topPila x = hd(!x)
+		handle Empty => raise Fail "La pila no tiene ningún elemento"
+
+end@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d3 1
+a3 1
+	type 'a Pila = 'a list 
+d6 7
+a12 5
+	fun nuevaPila () = []
+	fun nuevaPila1 x = [x]
+	fun pushPila x y = (y::x; ())
+	fun popPila x = (List.tl(x); ())
+	fun topPila x = hd(x)
+@

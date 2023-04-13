@@ -1,0 +1,9 @@
+let 
+	function f():int = 
+		let
+				function f():int = (print("f interna");f())
+		in (print("fexterna");f())
+		end
+in
+	f();()
+end

@@ -1,0 +1,25 @@
+head	1.1;
+access;
+symbols;
+locks
+	enrique:1.1; strict;
+comment	@# @;
+
+
+1.1
+date	2006.10.04.15.55.21;	author enrique;	state Exp;
+branches;
+next	;
+
+
+desc
+@Modulo para un variable global del compilador (número de línea)
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@val num_linea = ref 1@

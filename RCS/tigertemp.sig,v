@@ -1,0 +1,38 @@
+head	1.1;
+access;
+symbols;
+locks
+	enrique:1.1; strict;
+comment	@# @;
+
+
+1.1
+date	2006.10.04.16.07.44;	author enrique;	state Exp;
+branches;
+next	;
+
+
+desc
+@Signatura de tigertemp
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@signature tigertemp =
+sig
+	type label
+	eqtype temp
+	val fp:temp
+	val rv:temp
+	val sp:temp
+	val newtemp:unit->temp
+	val newlabel:unit->label
+	val namedlabel:string->label
+	val tempAstring:temp->string
+	val labelAstring:label->string
+	val makeString:label->string
+end@

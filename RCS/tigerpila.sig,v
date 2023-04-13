@@ -1,0 +1,36 @@
+head	1.1;
+access;
+symbols;
+locks
+	enrique:1.1; strict;
+comment	@# @;
+
+
+1.1
+date	2006.10.23.22.31.14;	author enrique;	state Exp;
+branches;
+next	;
+
+
+desc
+@Signatura de la estructura Tigerpila. La primera estructura utiliza listas.
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@signature tigerpila =
+sig
+	type 'a Pila
+	
+
+	val nuevaPila: unit->'a Pila
+	val nuevaPila1:'a->'a Pila
+	val pushPila:'a Pila->'a->unit
+	val popPila:'a Pila->unit
+	val topPila:'a Pila ->'a 
+
+end@

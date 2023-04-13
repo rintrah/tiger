@@ -1,0 +1,36 @@
+head	1.1;
+access;
+symbols;
+locks
+	enrique:1.1; strict;
+comment	@# @;
+
+
+1.1
+date	2006.10.04.16.06.23;	author enrique;	state Exp;
+branches;
+next	;
+
+
+desc
+@Signatura de tigermisc
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@signature tigermisc =
+sig
+
+val curry:('a*'b->'c)->'a->'b->'c
+val uncurry:('a->'b->'c)->('a*'b)->'c
+val flip: ('a*'b)->('b*'a)
+val merge: string list*string list ->string list
+val mergesort: string list ->string list
+val quick:(string *'b) list->(string *'b) list
+val dup:string list->bool
+
+end@

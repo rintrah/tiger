@@ -1,0 +1,8 @@
+let function a(c:int) = 
+	let function b() = print(chr(65+c))
+	in 
+		if c>1 then a(c-1) else b()
+	end
+in 
+	a(10)
+end

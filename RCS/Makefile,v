@@ -1,0 +1,304 @@
+head	1.4;
+access;
+symbols;
+locks
+	enrique:1.4; strict;
+comment	@# @;
+
+
+1.4
+date	2006.11.22.15.16.22;	author enrique;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2006.11.18.20.38.31;	author enrique;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2006.10.09.21.19.59;	author enrique;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2006.10.04.15.44.11;	author enrique;	state Exp;
+branches;
+next	;
+
+
+desc
+@Makefile para el compilador.
+@
+
+
+1.4
+log
+@Versión número 4 de Makefile. Se agregaron las estructuras tigerset, tigermap, y se empieza con tigerreg; esta última sin su correspondiente signatura
+@
+text
+@# Unix makefile for calc example
+MOSMLHOME=/usr/local/mosml
+MOSMLTOOLS=camlrunm $(MOSMLHOME)/tools
+MOSMLLEX=${MOSMLHOME}/bin/mosmllex
+MOSMLYACC=${MOSMLHOME}/bin/mosmlyac
+
+MOSMLC=mosmlc -c
+MOSMLL=mosmlc
+
+.SUFFIXES :
+.SUFFIXES : .sig .sml .ui .uo
+ 
+all: 	tigermain.uo tigerabs.uo tigernlin.uo tigertips.uo tigertab.uo tigersres.uo tigerpp.uo tigerescap.uo	  \
+			tigergrm.uo tigerlex.uo tigermisc.uo listpp.uo tigerpila.uo tigerseman.uo tigertree.uo tigertemp.uo 		\
+			tigertrans.uo tigerit.uo tigerframe.uo tigercanon.uo tigerassem.uo tigercodegen.uo tigermap.uo 					\
+		  tigerset.uo tigerreg.uo tiger 
+
+tiger: 
+	$(MOSMLL) -toplevel -o tiger tigermain.uo
+
+clean:
+	rm -f *.ui
+	rm -f *.uo
+	rm -f Makefile.bak
+	rm -f tiger
+
+# these rules are only needed if UNITS is undefined or empty
+.sig.ui:
+	$(MOSMLC) $<
+
+.sml.uo:
+	$(MOSMLC) $<
+
+depend: 
+	rm -f Makefile.bak
+	mv Makefile Makefile.bak
+	$(MOSMLTOOLS)/cutdeps < Makefile.bak > Makefile
+	$(MOSMLTOOLS)/mosmldep $(UNITS) >> Makefile
+
+### DO NOT DELETE THIS LINE
+tigerset.uo: tigerset.ui 
+tigertree.uo: tigertemp.ui 
+tigerlex.uo: tigergrm.ui tigernlin.uo 
+tigermisc.uo: tigermisc.ui 
+listpp.uo: tigersres.uo tigertips.uo 
+tigerpp.uo: tigerabs.uo 
+tigercoloreo.uo: tigercoloreo.ui tigerassem.ui tigertemp.ui tigerset.ui 
+tigercoloreo.ui: tigerassem.ui 
+tigersres.uo: tigertab.ui tigertips.uo tigerabs.uo tigertrans.ui 
+tigergrm.uo: tigergrm.ui tigernlin.uo tigerabs.uo 
+tigergrm.ui: tigerabs.uo 
+tigerassem.uo: tigerassem.ui tigertemp.ui 
+tigerassem.ui: tigertree.uo tigertemp.ui 
+tigerpila.uo: tigerpila.ui 
+tigerit.uo: tigertree.uo tigertab.ui tigertemp.ui 
+tigerseman.uo: tigerseman.ui tigersres.uo tigertab.ui tigerpila.ui \
+    topsort.uo tigerabs.uo tigermisc.ui listpp.uo tigertrans.ui 
+tigerseman.ui: tigerabs.uo 
+tigercodegen.uo: tigercodegen.ui tigertree.uo tigerframe.ui tigercanon.ui \
+    tigerassem.ui tigertemp.ui tigertrans.ui 
+tigercodegen.ui: tigertree.uo tigerframe.ui tigercanon.ui tigerassem.ui 
+tigermain.uo: tigerseman.ui tigercodegen.ui tigerescap.ui tigergrm.ui \
+    tigercanon.ui tigerlex.uo tigertrans.ui tigerpp.uo 
+tigerescap.uo: tigerescap.ui tigertab.ui tigerabs.uo 
+tigerescap.ui: tigerabs.uo 
+tigertemp.uo: tigertemp.ui 
+tigertrans.uo: tigertrans.ui tigertree.uo tigerpila.ui tigerframe.ui \
+    tigerit.uo tigertemp.ui tigerabs.uo 
+tigertrans.ui: tigertree.uo tigerframe.ui tigerabs.uo 
+tigerframe.uo: tigerframe.ui tigertree.uo tigerassem.ui tigertemp.ui 
+tigerframe.ui: tigertree.uo tigerassem.ui tigertemp.ui 
+tigercanon.uo: tigercanon.ui tigertree.uo tigertab.ui tigerframe.ui \
+    tigertemp.ui 
+tigercanon.ui: tigertree.uo tigerframe.ui tigertemp.ui tigertrans.ui 
+tigertab.uo: tigertab.ui 
+tigermap.uo: tigermap.ui 
+@
+
+
+1.3
+log
+@Tercer makefile.
+@
+text
+@d13 4
+a16 3
+all: 	tigermain.uo tigerabs.uo tigernlin.uo tigertips.uo tigertab.uo tigersres.uo tigerpp.uo tigerescap.uo \
+			tigergrm.uo tigerlex.uo tigermisc.uo listpp.uo tigerpila.uo tigerseman.uo tigertree.uo tigertemp.uo \
+			tigertrans.uo tigerit.uo tigerframe.uo tigercanon.uo tigerassem.uo tigercodegen.uo tiger 
+d41 1
+d47 2
+d60 1
+a60 1
+    tigerassem.ui tigertemp.ui 
+d73 1
+a73 1
+    tigerit.uo tigertemp.ui 
+d76 1
+@
+
+
+1.2
+log
+@Nueva versión de Makefile sin units y más corta
+@
+text
+@d13 3
+a15 1
+all: tigermain.uo tigerabs.uo tigernlin.uo tigertips.uo tigertab.uo tigersres.uo tigerpp.uo tigerescap.uo tigergrm.uo tigerlex.uo tigermisc.uo listpp.uo tigerseman.uo tigertree.uo tigertemp.uo tigertrans.uo tigerit.uo tigerframe.uo tiger 
+d40 11
+a50 3
+tigermisc.ui: tigerlex.uo  
+tigermisc.uo:tigermisc.ui tigerlex.uo 
+listpp.uo: tigermisc.ui 
+d52 2
+d55 6
+a60 2
+tigersres.uo: tigertab.ui tigertips.uo tigertrans.uo tigertemp.ui \
+    tigerabs.uo 
+d62 9
+a71 16
+tigerpp.uo: tigerabs.uo 
+tigerescap.uo: tigerescap.ui tigertab.ui tigerabs.uo 
+tigertrans.ui:tigerframe.ui tigertree.ui tigertemp.ui
+tigertrans.uo: tigertree.uo tigertrans.ui tigerframe.ui tigerit.uo tigertemp.ui \
+    tigerabs.uo 
+tigertemp.uo: tigertemp.ui 
+tigerframe.uo: tigerframe.ui tigertree.uo tigertemp.ui 
+tigergrm.ui: tigerabs.uo 
+tigergrm.uo: tigergrm.ui tigernlin.uo tigerabs.uo 
+tigerlex.uo: tigergrm.ui tigernlin.uo 
+tigertree.uo: tigertemp.ui 
+tigerframe.ui: tigertree.uo tigertemp.ui 
+tigerseman.uo: tigerseman.ui tigersres.uo tigertab.ui tigertips.uo \
+    topsort.uo tigertrans.uo tigerabs.uo listpp.uo
+tigermain.uo: tigerseman.ui tigerescap.ui tigergrm.ui tigerlex.uo \
+    tigerpp.uo 
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@a9 2
+UNITS= topsort tigerabs tigertab tigernlin tigertips tigersres tigerpp tigerescap tigergrm tigerlex tigermisc listpp tigertemp tigertree tigerframe tigerit tigertrans tigerseman tigermain
+
+d13 1
+a13 1
+all: tigermain.uo tigerabs.uo tigernlin.uo tigertips.uo tigertab.uo tigersres.uo tigerpp.uo tigerescap.uo tigergrm.uo tigerlex.uo tigermisc.uo listpp.uo tigertemp.uo tigertree.uo tigerframe.uo tigerit.uo tigertrans.uo tigerseman.uo tiger
+d38 25
+a62 111
+topsort.uo: topsort.sml 
+	$(MOSMLC) -structure topsort.sml 
+tigerabs.uo: tigerabs.sml topsort.uo 
+	$(MOSMLC) -structure topsort.ui tigerabs.sml 
+tigertab.ui: tigertab.sig tigerabs.uo 
+	$(MOSMLC) -structure tigerabs.ui topsort.ui tigertab.sig 
+tigertab.uo: tigertab.sml tigertab.ui tigerabs.uo 
+	$(MOSMLC) -structure tigerabs.ui topsort.ui \
+    tigertab.sml 
+tigernlin.uo: tigernlin.sml tigertab.ui 
+	$(MOSMLC) -structure tigertab.ui tigerabs.ui topsort.ui \
+    tigernlin.sml 
+tigertips.uo: tigertips.sml tigernlin.uo 
+	$(MOSMLC) -structure tigernlin.ui tigertab.ui \
+    tigerabs.ui topsort.ui tigertips.sml 
+tigersres.uo: tigersres.sml tigertips.uo 
+	$(MOSMLC) -structure tigertips.ui tigernlin.ui \
+    tigertab.ui tigerabs.ui topsort.ui tigersres.sml 
+tigerpp.uo: tigerpp.sml tigersres.uo 
+	$(MOSMLC) -structure tigersres.ui tigertips.ui tigernlin.ui \
+    tigertab.ui tigerabs.ui topsort.ui tigerpp.sml 
+tigerescap.ui: tigerescap.sig tigerpp.uo 
+	$(MOSMLC) -structure tigerpp.ui tigersres.ui \
+    tigertips.ui tigernlin.ui tigertab.ui tigerabs.ui topsort.ui \
+    tigerescap.sig 
+tigerescap.uo: tigerescap.sml tigerescap.ui tigerpp.uo 
+	$(MOSMLC) -structure tigerpp.ui \
+    tigersres.ui tigertips.ui tigernlin.ui tigertab.ui tigerabs.ui \
+    topsort.ui tigerescap.sml 
+tigergrm.ui: tigergrm.sig tigerescap.ui 
+	$(MOSMLC) -structure -liberal tigerescap.ui tigerpp.ui \
+    tigersres.ui tigertips.ui tigernlin.ui tigertab.ui tigerabs.ui \
+    topsort.ui tigergrm.sig 
+tigergrm.uo: tigergrm.sml tigergrm.ui tigerescap.ui 
+	$(MOSMLC) -structure tigerescap.ui \
+    tigerpp.ui tigersres.ui tigertips.ui tigernlin.ui tigertab.ui \
+    tigerabs.ui topsort.ui tigergrm.sml 
+tigerlex.uo: tigerlex.sml tigergrm.ui 
+	$(MOSMLC) -structure tigergrm.ui tigerescap.ui tigerpp.ui \
+    tigersres.ui tigertips.ui tigernlin.ui tigertab.ui tigerabs.ui \
+    topsort.ui tigerlex.sml 
+tigermisc.ui: tigermisc.sig tigerlex.uo 
+	$(MOSMLC) -structure tigerlex.ui tigergrm.ui \
+    tigerescap.ui tigerpp.ui tigersres.ui tigertips.ui tigernlin.ui \
+    tigertab.ui tigerabs.ui topsort.ui tigermisc.sig 
+tigermisc.uo: tigermisc.sml tigermisc.ui tigerlex.uo 
+	$(MOSMLC) -structure tigerlex.ui \
+    tigergrm.ui tigerescap.ui tigerpp.ui tigersres.ui tigertips.ui \
+    tigernlin.ui tigertab.ui tigerabs.ui topsort.ui tigermisc.sml 
+listpp.uo: listpp.sml tigermisc.ui 
+	$(MOSMLC) -structure tigermisc.ui tigerlex.ui tigergrm.ui \
+    tigerescap.ui tigerpp.ui tigersres.ui tigertips.ui tigernlin.ui \
+    tigertab.ui tigerabs.ui topsort.ui listpp.sml 
+tigertemp.ui: tigertemp.sig listpp.uo 
+	$(MOSMLC) -structure listpp.ui tigermisc.ui tigerlex.ui \
+    tigergrm.ui tigerescap.ui tigerpp.ui tigersres.ui tigertips.ui \
+    tigernlin.ui tigertab.ui tigerabs.ui topsort.ui tigertemp.sig 
+tigertemp.uo: tigertemp.sml tigertemp.ui listpp.uo 
+	$(MOSMLC) -structure listpp.ui tigermisc.ui \
+    tigerlex.ui tigergrm.ui tigerescap.ui tigerpp.ui tigersres.ui \
+    tigertips.ui tigernlin.ui tigertab.ui tigerabs.ui topsort.ui \
+    tigertemp.sml 
+tigertree.uo: tigertree.sml tigertemp.ui 
+	$(MOSMLC) -structure tigertemp.ui listpp.ui \
+    tigermisc.ui tigerlex.ui tigergrm.ui tigerescap.ui tigerpp.ui \
+    tigersres.ui tigertips.ui tigernlin.ui tigertab.ui tigerabs.ui \
+    topsort.ui tigertree.sml 
+tigerframe.ui: tigerframe.sig tigertree.uo 
+	$(MOSMLC) -structure tigertree.ui tigertemp.ui \
+    listpp.ui tigermisc.ui tigerlex.ui tigergrm.ui tigerescap.ui tigerpp.ui \
+    tigersres.ui tigertips.ui tigernlin.ui tigertab.ui tigerabs.ui \
+    topsort.ui tigerframe.sig 
+tigerframe.uo: tigerframe.sml tigerframe.ui tigertree.uo 
+	$(MOSMLC) -structure tigertree.ui \
+    tigertemp.ui listpp.ui tigermisc.ui tigerlex.ui tigergrm.ui \
+    tigerescap.ui tigerpp.ui tigersres.ui tigertips.ui tigernlin.ui \
+    tigertab.ui tigerabs.ui topsort.ui tigerframe.sml 
+tigerit.uo: tigerit.sml  tigerframe.ui 
+	$(MOSMLC) -structure tigerframe.ui tigertree.ui \
+    tigertemp.ui listpp.ui tigermisc.ui tigerlex.ui tigergrm.ui \
+    tigerescap.ui tigerpp.ui tigersres.ui tigertips.ui tigernlin.ui \
+    tigertab.ui tigerabs.ui topsort.ui tigerit.sml 
+tigertrans.ui: tigertrans.sig tigerit.uo 
+	$(MOSMLC) -structure  tigerframe.ui \
+    tigertree.ui tigertemp.ui listpp.ui tigermisc.ui tigerlex.ui \
+    tigergrm.ui tigerescap.ui tigerpp.ui tigersres.ui tigertips.ui \
+    tigernlin.ui tigertab.ui tigerabs.ui topsort.ui tigertrans.sig 
+tigertrans.uo: tigertrans.sml tigertrans.ui tigerit.ui 
+	$(MOSMLC) -structure tigerit.uo \
+    tigerframe.ui tigertree.ui tigertemp.ui listpp.ui tigermisc.ui \
+    tigerlex.ui tigergrm.ui tigerescap.ui tigerpp.ui tigersres.ui \
+    tigertips.ui tigernlin.ui tigertab.ui tigerabs.ui topsort.ui \
+    tigertrans.sml 
+tigerseman.ui: tigerseman.sig tigertrans.ui 
+	$(MOSMLC) -structure tigertrans.ui tigerit.ui \
+    tigerframe.ui tigertree.ui tigertemp.ui listpp.ui tigermisc.ui \
+    tigerlex.ui tigergrm.ui tigerescap.ui tigerpp.ui tigersres.ui \
+    tigertips.ui tigernlin.ui tigertab.ui tigerabs.ui topsort.ui \
+    tigerseman.sig 
+tigerseman.uo: tigerseman.sml tigerseman.ui tigertrans.ui 
+	$(MOSMLC) -structure tigertrans.ui \
+    tigerit.ui tigerframe.ui tigertree.ui tigertemp.ui listpp.ui \
+    tigermisc.ui tigerlex.ui tigergrm.ui tigerescap.ui tigerpp.ui \
+    tigersres.ui tigertips.ui tigernlin.ui tigertab.ui tigerabs.ui \
+    topsort.ui tigerseman.sml 
+tigermain.uo: tigermain.sml tigerseman.ui 
+	$(MOSMLC) -structure tigerseman.ui tigertrans.ui \
+    tigerit.ui tigerframe.ui tigertree.ui tigertemp.ui listpp.ui \
+    tigermisc.ui tigerlex.ui tigergrm.ui tigerescap.ui tigerpp.ui \
+    tigersres.ui tigertips.ui tigernlin.ui tigertab.ui tigerabs.ui \
+    topsort.ui tigermain.sml 
+@

@@ -1,0 +1,39 @@
+head	1.1;
+access;
+symbols;
+locks
+	enrique:1.1; strict;
+comment	@# @;
+
+
+1.1
+date	2006.10.04.16.02.41;	author enrique;	state Exp;
+branches;
+next	;
+
+
+desc
+@Modulo que contiene la definición de los tipos de tiger
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@structure tigertips =
+struct
+
+type unique = unit ref
+datatype Tipo = TUnit
+	| TNil
+	| TInt
+	| TString
+	| TArray of Tipo * unique
+	| TRecord of (string * Tipo * int) list * unique
+	| TFunc of Tipo list * Tipo
+	| TTipo of string * Tipo option ref
+
+end
+@

@@ -1,0 +1,1727 @@
+head	1.7;
+access;
+symbols;
+locks
+	enrique:1.7; strict;
+comment	@# @;
+
+
+1.7
+date	2007.05.30.12.16.57;	author enrique;	state Exp;
+branches;
+next	1.6;
+
+1.6
+date	2007.05.05.00.45.22;	author enrique;	state Exp;
+branches;
+next	1.5;
+
+1.5
+date	2007.03.19.00.27.30;	author enrique;	state Exp;
+branches;
+next	1.4;
+
+1.4
+date	2006.12.19.00.51.49;	author enrique;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2006.12.13.03.07.47;	author enrique;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2006.12.07.02.29.45;	author enrique;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2006.12.05.15.24.14;	author enrique;	state Exp;
+branches;
+next	;
+
+
+desc
+@Alocador de registros para el compilador de tiger.
+@
+
+
+1.7
+log
+@Versión 1.7 de tigerreg. Esta versión funciona en la mayoría de los casos. En combine utilizo differenceSet en dos ocasiones, es importante verificar si es correcto.
+@
+text
+@structure tigerreg  =
+struct
+		
+		open tigerframe	
+		open tigertemp
+		open tigerassem
+		open tigerset
+		open tigermap 
+		open tigerpila
+		open tigerliveness
+
+fun coloreo(marco:tigerframe.frame, instrucciones:tigerassem.instr list) =
+let
+		val bloqueInstrucciones = ref instrucciones 
+		val nuevoMarco = ref marco
+		val listaDeRegistros = [ rv, ov, ebx, ecx, esi, edi, fp, sp]  
+
+		fun itoa i = (if i < 0 then "-" else "")^(Int.toString(Int.abs(i))) 
+		fun temptupla((a,b), (c,d)) =
+			 case  (tempeq(a,c), tempeq (b,d)) of
+				(EQUAL, EQUAL) => EQUAL
+				|(EQUAL, e)  => e
+				| (e, _) => e
+
+ 		fun cmpInstr((a,b), (c,d)) = Int.compare(a,c)
+	
+		(* Conjuntos, listas globales para el coloreo. *)
+		(* Lista globales de moves. *)
+
+		val worklistMoves = newSet cmpInstr 
+		val activeMoves = newSet cmpInstr
+		val coalescedMoves = newSet cmpInstr
+		val constrainedMoves = newSet cmpInstr
+		val frozenMoves = newSet cmpInstr
+		
+		(*  Listas de trabajo, conjuntos y pilas de nodos. *)
+
+		val precolored = fromListSet(listaDeRegistros, tempeq);
+
+		val initial = newSet tempeq
+		val simplifyWorkList = newSet tempeq
+		val freezeWorkList = newSet tempeq
+		val spillWorkList = newSet tempeq
+		val spilledNodes = newSet tempeq
+		val coalescedNodes = newSet tempeq
+		val coloredNodes = newSet tempeq
+		val selectStack:tigertemp.temp tigerpila.Pila = nuevaPila ()
+		val pushTemp = tigerpila.pushPila selectStack
+		fun showTemp () = tigerpila.showPila selectStack 
+		fun popTemp () = tigerpila.popPila selectStack
+		fun topTemp () = tigerpila.topPila selectStack
+
+		(* Otras estructuras de datos. *)
+
+		val K = 8 
+		val adjList = newMap tempeq
+		val adjSet = newSet temptupla
+		val alias = newMap tempeq
+		val degree = newMap tempeq
+		val _ = List.app 
+						(fn x => (insertMap degree x  
+							(case Int.maxInt of SOME e => e
+							| NONE =>  raise Fail "¡Error: mosml no tiene entero máximo!")
+							))
+							listaDeRegistros 
+
+		val color = newMap tempeq
+		val moveList = newMap tempeq
+
+		(* Funciones auxiliares para el coloreo. *)
+	
+		fun upto(m,n) = if m > n then [] else m :: upto (m+1, n)
+		
+		val _ = 
+			let val l = ListPair.zip (upto(0,(List.length listaDeRegistros)-1), 
+										listaDeRegistros) 
+			in
+				 List.app (fn (x,y) => insertMap color y x ) l 
+			end
+
+
+    fun isMoveInstruction (OPER {...})  = false
+    |isMoveInstruction (LABEL {...})    = false
+    |isMoveInstruction (MOVE {...})     = true
+
+    fun use (OPER {src, ...}) = fromListSet(src, tempeq)
+    |use (LABEL{...}) = newSet tempeq
+    |use (MOVE{src, ...}) = fromListSet([src], tempeq)
+
+    fun def (OPER {dst, ...}) = fromListSet(dst, tempeq)
+    |def (LABEL{...}) = newSet tempeq
+    |def (MOVE{dst,...}) = fromListSet([dst], tempeq)
+
+    val _ = (List.app (fn x => (addSet(initial, use x);
+						 addSet(initial, def x))) (!bloqueInstrucciones);
+            differenceSet(initial, precolored))
+
+		fun printSets () =
+					(print ("\nInitial: \n"^printSet(initial, tempAstring)^"\n"); 
+					 print ("SimplifyWorkList: \n"^printSet(simplifyWorkList, tempAstring)^"\n"); 
+					 print ("FreezeWorkList: \n"^printSet(freezeWorkList, tempAstring)^"\n");
+					 print ("SpillWorkList: \n"^printSet(spillWorkList, tempAstring)^"\n");
+					 print ("SpilledNodes: \n"^printSet(spilledNodes, tempAstring)^"\n"); 
+					 print ("CoalescedNodes: \n"^printSet(coalescedNodes, tempAstring)^"\n");
+					 print ("ColoredNodes: \n"^printSet(coloredNodes, tempAstring)^"\n"); 
+					 print ("SelectStack: \n") ;List.app (fn x=> print (tempAstring(x)^"\n")) (showTemp());
+					 print "\n")	
+
+		fun printAdjSet () = print (printSet(adjSet, fn (x,y) => ("("^tempAstring(x)^","^tempAstring(y)^")")))		
+
+		val single = singletonSet tempeq
+
+		fun encuentraMapa mapa llave neutro = case peekMap mapa llave  of 
+																					SOME a => a 
+																					| NONE => neutro 
+
+		fun AddEdge(u,v) =
+			if (not(memberSet(adjSet,(u,v)))	andalso (cmptemp(u,v) = false)) then
+				(insertSet(adjSet, (u,v)); insertSet(adjSet,(v,u));
+					if not(memberSet(precolored, u)) then
+						(insertMap adjList u (unionSet(encuentraMapa adjList u (newSet tempeq), single v));
+						 insertMap degree u ((encuentraMapa degree u 0)+1))
+					else ();
+					if not(memberSet(precolored, v)) then
+						(insertMap adjList v (unionSet(encuentraMapa adjList v (newSet tempeq), single u));
+						 insertMap degree v ((encuentraMapa degree v 0)+1))
+					else ())
+			else ()
+	
+		fun Adjacent n =
+			let val nuevoSet = fromListSet(showTemp(), tempeq);
+			in 
+				case (peekMap adjList n) of
+					SOME e => minusSet(e , unionSet(nuevoSet, coalescedNodes)) 
+					|NONE  => (newSet tempeq)
+			end
+		
+		fun NodeMoves n =
+			case (peekMap moveList n) of 
+				SOME e=> interSet(e ,unionSet(activeMoves, worklistMoves))
+				|NONE => newSet(cmpInstr)  
+				
+		fun MoveRelated n = not(isEmptySet(NodeMoves n))	
+
+		fun EnableMoves nodes =
+			forAllSet(nodes, 
+			fn n => 
+				forAllSet(NodeMoves n, 
+					fn m => if (memberSet(activeMoves, m))
+					then
+						(differenceSet(activeMoves, singletonSet cmpInstr m);
+					  addSet(worklistMoves, singletonSet cmpInstr m))
+					else ())) 
+
+		fun DecrementDegree m =
+				let 
+						val d = case peekMap degree m of
+									SOME e => e 
+							    | NONE  => raise Fail ("El temporal "^tempAstring(m)^" no tiene grado\n")
+						val _ =  insertMap degree m (d - 1)
+				in
+ 					if d = K then 
+								(EnableMoves(unionSet(single m, (Adjacent m)));
+								differenceSet(spillWorkList, single m);
+								if (MoveRelated m) then 
+										addSet(freezeWorkList, single m)
+								else addSet(simplifyWorkList, single m))
+					else ()
+				end 
+
+		fun AddWorkList u =
+			if not(memberSet(precolored, u)) andalso
+				 not((MoveRelated u) andalso 
+					(((getMap degree u )
+				 handle NotFound => raise Fail ("Not found surgió en AddWorkList con el temporal "^tempAstring(u)))  < K ))
+				 then
+						(differenceSet(freezeWorkList,single u);
+						addSet(simplifyWorkList,single u))
+				else ()  
+		
+		fun Ok(t,r) =
+		 let val valor = 
+				case (peekMap degree t ) of SOME e => e
+				| NONE => raise Fail ("El temporal "^(tempAstring t)^" no tiene grado, para la función Ok\n.")
+		 in
+				valor < K orelse memberSet(precolored, t)
+				orelse memberSet(adjSet, (t, r))
+		 end 
+
+		fun Conservative nodes =
+			let val k = ref 0
+					fun grado n  =
+					 case peekMap degree n of 
+						SOME e => e
+						|NONE => raise Fail ("El temporal "^(tempAstring n)^" no tiene grado, para la función Conservative.\n") 
+			in 
+				forAllSet(nodes,
+					fn n => if grado n >= K 
+						then k := !k + 1
+						else ());
+				!k < K
+			end 
+
+		fun GetAlias n =
+			if memberSet(coalescedNodes, n)
+				 then (
+					 case peekMap alias n of
+						SOME e => (GetAlias e)
+						| NONE => raise Fail ("El temporal "^(tempAstring n)^" no tiene alias, para la función GetAlias")) 
+			else n 
+
+		fun Combine(u,v) = 
+			(if memberSet(freezeWorkList, v) 
+			then
+				differenceSet(freezeWorkList, single v)
+			else 
+				differenceSet(spillWorkList, single v);
+			addSet(coalescedNodes, single v);
+			insertMap alias v  u;
+			insertMap moveList u (unionSet(encuentraMapa moveList u (newSet cmpInstr), getMap moveList v));
+			EnableMoves(single v);
+			forAllSet(Adjacent(v), fn t =>
+				 (AddEdge(t, u); DecrementDegree(t)));
+			if ((getMap degree u )
+					 handle NotFound => raise Fail ("El temporal "^tempAstring(u)^" no tiene grado.\n"))
+				 >= K andalso memberSet(freezeWorkList, u) 
+			then
+				(differenceSet(freezeWorkList, single u); 
+				addSet(spillWorkList, single u))
+			else ())
+
+		fun FreezeMoves (u) = 
+			forAllSet(NodeMoves(u),
+				fn m =>
+				let  	
+					fun fuente(_ , MOVE{src, ...}) = src
+					|fuente _ = raise Fail "Existe una instrucción no move en worklistMoves"
+					fun destino(_, MOVE{dst, ...}) = dst
+					|destino _ = raise Fail "Existe una instrucción no move en worklistMoves" 
+					val (x,y) = (fuente(m), destino(m))	
+					val v = if cmptemp(GetAlias(y),(GetAlias(u))) 
+									then 
+											GetAlias(x)
+									else 
+											GetAlias(y)
+				in
+					differenceSet(activeMoves, singletonSet cmpInstr m);
+					addSet(frozenMoves, singletonSet cmpInstr m);
+					if isEmptySet(NodeMoves(v)) andalso 
+						((getMap degree v )
+								 handle NotFount => raise Fail ("El temporal "^tempAstring(v)^" no tiene grado en Freeze.\n"))
+						< K then 
+						(differenceSet(freezeWorkList, single v); 
+						addSet(simplifyWorkList, single v))
+					else ()
+				end )
+
+		fun Invariant() =
+				(forAllSet(unionSet(simplifyWorkList,unionSet(freezeWorkList, spillWorkList)),
+					fn u => if (getMap degree u = cardinalSet(interSet(getMap adjList u,unionSet(precolored, unionSet(simplifyWorkList,
+				unionSet(freezeWorkList, spillWorkList)))))) then () 
+					else raise Fail ("El invariante de Degree no se cumple en el temporal "^tempAstring(u)^"\n")); 
+				forAllSet(spillWorkList, 
+					fn u => if (getMap degree u >= K) then ()
+					else raise Fail ("El invariante de Spill WorkList no se cumple en el temporal "^tempAstring(u)^"\n"))) 					
+ 
+		(* Funciones principales del coloreo. *)
+
+		fun Build () =
+				let
+						val listilla = 
+							ListPair.zip (upto(1,List.length (!(bloqueInstrucciones))),
+							!(bloqueInstrucciones))
+						val listaInstr = List.rev listilla
+						val liveOut = Liveness (!(bloqueInstrucciones))
+				(*		val _ = printMap Int.toString (fn n => printSet(n, tempAstring)) liveOut *)
+						val live = 	newSet tempeq
+				in
+				List.app 
+					(fn  (ind, I) =>	
+						let 
+								val (useI, defI) = (use I , def I) 
+								val useDef = unionSet(useI, defI)		
+								val _ =	case I of
+												OPER{jump = SOME [etiqueta], ...}  =>  
+												(setEmptySet(live);
+													addSet(live,
+		(getMap liveOut ind) handle NotFound => raise Fail ("No se encontró el liveOut de "^Int.toString(ind)^"\n")))
+												| _ => ()  	
+						in
+					    if isMoveInstruction I then 
+									(differenceSet(live, useI);
+									forAllSet (useDef, fn x => 
+									case (peekMap moveList x) of
+									SOME a => insertMap moveList x (addSet(getMap moveList x,singletonSet cmpInstr (ind, I));getMap moveList x)
+									|NONE => insertMap moveList x (singletonSet cmpInstr (ind, I)));
+									addSet(worklistMoves, singletonSet cmpInstr (ind,I)))
+									else ();
+									addSet(live, defI);
+									forAllSet (defI, fn x => forAllSet(live, fn y => AddEdge(x, y)));
+									differenceSet(live, defI);
+									addSet(live, useI) 
+						end) listaInstr		
+		end
+														
+		fun MakeWorklist () =
+			forAllSet(initial, 
+				fn n => (differenceSet(initial, single n);
+								if (encuentraMapa degree n 0) >= K 
+								then 
+									addSet(spillWorkList, single n)
+								else if MoveRelated(n)
+										 then 
+										 addSet(freezeWorkList, single n)
+										 else
+										 addSet(simplifyWorkList, single n);
+				())) 
+		
+		fun Simplify	() =
+				let
+						val n = List.hd (listItemsSet simplifyWorkList)
+            val _ = differenceSet(simplifyWorkList,single n)
+						val _ = pushTemp n;	
+				in
+  					forAllSet(Adjacent n, fn m => DecrementDegree m)
+				end 
+	
+		fun Coalesce () =
+			let
+				fun fuente(_ , MOVE{src, ...}) = src
+				|fuente _ = raise Fail "Existe una instrucción no move en worklistMoves"
+				fun destino(_, MOVE{dst, ...}) = dst
+				|destino _ = raise Fail "Existe una instrucción no move en worklistMoves" 
+				val m = List.hd (listItemsSet worklistMoves)
+				val x = GetAlias(destino m)
+				val y = GetAlias(fuente m)
+				val (u,v) = if memberSet(precolored, y) then (y,x) else (x,y)
+			in
+				differenceSet(worklistMoves,singletonSet cmpInstr m); 
+				if cmptemp(u,v) 
+				then (
+					addSet(coalescedMoves,singletonSet cmpInstr m);
+					AddWorkList(u))
+				else if (memberSet(precolored, v) orelse memberSet(adjSet, (u,v)))
+						 then
+						(addSet(constrainedMoves, singletonSet cmpInstr m);
+						 AddWorkList(u);
+						 AddWorkList(v))
+				else if memberSet(precolored, u) andalso 
+							(List.all (fn t => Ok(t,u)) (listItemsSet(Adjacent(v)))) orelse
+							not(memberSet(precolored, u))	 andalso 
+							Conservative(unionSet(Adjacent u, Adjacent v)) then
+							(addSet(coalescedMoves, singletonSet cmpInstr m);
+							Combine(u,v);
+							AddWorkList(u)) 
+						else
+							addSet(activeMoves, singletonSet cmpInstr m)
+			end 
+	  
+		
+		fun Freeze () =
+			let val u = List.hd (listItemsSet(freezeWorkList))
+			in
+				differenceSet(freezeWorkList,single u);
+				addSet(simplifyWorkList, single u); 
+				FreezeMoves(u)
+			end
+	
+		fun SelectSpill () =
+			let val m = List.hd(listItemsSet(spillWorkList))
+			in
+				differenceSet(spillWorkList, single m);
+				addSet(simplifyWorkList, single m); 
+				FreezeMoves(m)
+			end
+
+		fun AssignColor () =
+			let 
+				val _ = while (not(null(showTemp()))) do 
+					let val n = topTemp();
+							val _ = popTemp();
+							val okColors = 
+								let val t= newSet(Int.compare)
+						    		val _ = addSet(t, fromListSet([0,1,2,3,4,5], Int.compare))
+										in t 
+								end
+					in 
+						forAllSet(encuentraMapa adjList n (newSet tempeq),
+						fn w => if (memberSet(unionSet(coloredNodes, precolored), GetAlias(w)))
+										then differenceSet(okColors, singletonSet Int.compare 
+										(getMap color (GetAlias(w))
+								 handle NotFound => raise Fail ("NotFound surgió en color GetAlias debido al temporal"^tempAstring(w))
+										))
+									 else ());
+					 if (isEmptySet(okColors)) 
+					 then addSet(spilledNodes, single n)
+					 else 
+								let  val L = listItemsSet(okColors)
+									 	 val c = List.hd(L)
+								in 
+										addSet(coloredNodes, single n); 
+										insertMap color n c 
+								end
+					end
+			in
+				forAllSet(coalescedNodes,
+				fn n => insertMap color n (
+							(getMap color (GetAlias (n)) 
+			handle NotFound => 
+			raise Fail ("Surgió un error en Assign Color debido al temporal: "
+					^tempAstring(n)^" y su alias: "^tempAstring(GetAlias(n))^".\n")
+			)))
+		end 		 
+
+		
+		fun  iter()= if (not(isEmptySet(simplifyWorkList))) then Simplify ()
+						else if (not(isEmptySet(worklistMoves))) then Coalesce ()
+						else if (not(isEmptySet(freezeWorkList))) then Freeze ()
+						else if (not(isEmptySet(spillWorkList))) then SelectSpill () else ()			 
+
+		fun RewriteProgram () = 
+			let 
+			(*	val _ = printSets()
+				val _ = printMap tempAstring (fn n => printSet(n,tempAstring)) adjList*)
+				val newTemps = newSet(tempeq)	
+
+				fun use(reg, OPER{src, ...}) = 
+						List.exists (fn x => cmptemp(reg, x)) src
+				|use(reg, MOVE{src, ...}) = cmptemp(reg, src)
+				|use(reg, LABEL{...}) = false 
+
+				fun definition(reg, OPER{dst, ...}) = 
+						List.exists (fn x => cmptemp(reg, x)) dst
+				|definition(reg, MOVE{dst, ...}) = cmptemp(reg, dst)
+				|definition(reg, LABEL{...}) = false
+				
+				fun cambiarDestino(reg, temporal, OPER{assem, dst, src, jump}) = 
+					OPER{assem=assem,  
+						dst = List.map (fn x => if cmptemp(x, reg) then temporal else x) dst,
+						src=src, jump=jump}
+				|cambiarDestino(reg, temporal, MOVE{assem, src, dst}) = 
+				  MOVE{assem=assem, dst=temporal, src=src}
+				|cambiarDestino _ = 
+					raise Fail "Error: Se trata de cambiar el campo dst en un LABEL.\n"
+		
+				fun cambiarFuente(reg, temporal, OPER{assem, dst, src, jump}) =
+					OPER{assem=assem, dst=dst, 
+						src=List.map (fn x => if cmptemp(x, reg) then temporal else x) src,
+					jump = jump}
+				|cambiarFuente(reg, temporal, MOVE{assem, dst, src}) = 
+					MOVE{assem=assem, dst=dst, src=temporal}
+				|cambiarFuente _ = raise Fail "Error: Se trata de cambiar el campo src en un LABEL.\n"
+	
+				fun fetch (posicion, temporal) =
+					OPER{assem = "movl "^itoa(posicion)^"(%`s0), %`d0 #91\n",
+					dst = [temporal], src = [fp], jump=NONE}
+				fun store (posicion, temporal) =
+					 OPER{assem = "movl %`s0, "^itoa(posicion)^"(%`s1) #92\n",
+					dst = [], src = [temporal,fp], jump=NONE}
+	
+			fun reescritura (v,pos, []) = [] 
+			|reescritura (v,pos, x::xs) = 
+				if (use(v, x)) then 
+					let  
+						val temporal = newtemp()
+						val _ = addSet(newTemps, single temporal)
+					in
+						fetch(pos, temporal)::
+							cambiarFuente(v, temporal,x)::
+							reescritura(v,pos, xs)
+					end
+				else if (definition(v, x)) then
+					let
+						val temporal = newtemp()
+						val _ = addSet(newTemps, single temporal)
+					in
+						cambiarDestino(v, temporal, x)::
+							store(pos, temporal)::
+							reescritura(v,pos, xs)
+					end
+				else x::(reescritura(v,pos, xs))
+
+			fun help (v, lista) =
+				let
+					val pos = case  (allocLocal  (!nuevoMarco) true) of InFrame e => e
+					|InReg e => raise Fail "Error en la alocación de RewriteProgram\n"
+				in
+					reescritura (v, pos, lista)
+				end		
+			val _ = bloqueInstrucciones:=  List.foldr help (!bloqueInstrucciones) (listItemsSet spilledNodes)
+			val _ = setEmptySet(spilledNodes)
+			val _ = setEmptySet(initial)
+			val _ = addSet(initial, coloredNodes)
+			val _ = addSet(initial, coalescedNodes)
+			val _ = addSet(initial, newTemps) 	
+			val _ = setEmptySet(coloredNodes)
+			val _ = setEmptySet(coalescedNodes)
+		in
+			()	
+		end
+	
+		fun Colorear() = 
+			let
+				fun registro x =
+					List.nth (listaDeRegistros, (getMap color x )
+					 handle NotFound => raise Fail ("No se encontró el color del temporal "^tempAstring(x) ^" \n"))
+				fun pintar(OPER{assem, dst, src,  jump}) =
+					 OPER{assem=assem, dst=List.map registro dst,
+						src=List.map registro src, jump=jump}
+				|pintar(MOVE{assem, dst, src}) = MOVE{assem=assem, dst=registro dst, src=registro src}
+				|pintar e = e
+			in
+				bloqueInstrucciones:= List.map pintar(!bloqueInstrucciones)
+			end
+
+		fun Coalescer() = 
+				let 
+						fun eliminar(MOVE{assem, dst, src}) = if (cmptemp(dst,src)) then false else true
+						|eliminar _ = true
+				in 
+						(bloqueInstrucciones:=List.filter eliminar (!bloqueInstrucciones))
+ 				end
+
+		fun repeat() = (
+			iter();  
+			(if ((isEmptySet(simplifyWorkList)) andalso (isEmptySet(worklistMoves)) andalso (isEmptySet(freezeWorkList)) andalso
+			(isEmptySet(spillWorkList))) then () else repeat()))
+
+		fun principal() =
+			(Build();
+			MakeWorklist (); 
+			repeat();
+			AssignColor();
+		  if isEmptySet(spilledNodes) then () else 
+			(RewriteProgram();principal()))
+
+			 
+	
+in
+	principal();
+	Colorear(); 
+	Coalescer();
+	procEntryExit3(!nuevoMarco,!bloqueInstrucciones)
+	 
+end
+			
+end
+  	
+@
+
+
+1.6
+log
+@Versión 1.6 de tigerreg. Eliminé Liveness del cuerpo del programa, y creo que lo que falla es que el resultado del liveness  se descarta totalmente.
+@
+text
+@d19 6
+a24 1
+		fun temptupla((a,b), (c,d)) = if (tempeq(a,c) = EQUAL) then tempeq (b,d) else tempeq(a,c)
+d60 6
+a65 3
+		val _ = List.app (fn x => (insertMap degree x  (case Int.maxInt of SOME e => e
+																														| NONE =>  raise Fail "¡Error: mosml no tiene entero máximo!")
+										)) listaDeRegistros 
+d74 6
+a79 2
+		val _ = let val l = ListPair.zip (upto(0,(List.length listaDeRegistros)-1), listaDeRegistros) 
+						in List.app (fn (x,y) => insertMap color y x ) l end
+d94 2
+a95 1
+    val _ = (List.app (fn x => (addSet(initial, use x); addSet(initial, def x))) (!bloqueInstrucciones);
+d98 10
+d109 1
+a109 4
+		fun isMoveInstruction (OPER {...}) 	= false
+		|isMoveInstruction (LABEL {...}) 		= false
+		|isMoveInstruction (MOVE {...}) 		= true		
+
+d111 1
+a111 10
+		fun printSets () =
+					(print "\nInitial: \n";printSet(initial, tempAstring); print "\n"; 
+					 print "SimplifyWorkList: \n";printSet(simplifyWorkList, tempAstring); print "\n"; 
+					 print "FreezeWorkList: \n";printSet(freezeWorkList, tempAstring); print "\n";
+					 print "SpillWorkList: \n";printSet(spillWorkList, tempAstring); print "\n";
+					 print "SpilledNodes: \n"; printSet(spilledNodes, tempAstring); print "\n"; 
+					 print "CoalescedNodes: \n"; printSet(coalescedNodes, tempAstring); print "\n";
+					 print "ColoredNodes: \n"; printSet(coloredNodes, tempAstring); print "\n"; 
+					 print "SelectStack: \n" ;List.app (fn x=> print (tempAstring(x)^"\n")) (showTemp());
+					 print "\n")	
+d113 3
+a115 1
+		fun printAdjSet () = printSet(adjSet, fn (x,y) => ("("^tempAstring(x)^","^tempAstring(y)^")"))		
+d118 11
+a128 25
+			(if (not(memberSet(adjSet,(u,v)))	andalso (cmptemp(u,v) = false)) then
+					(insertSet(adjSet, (u,v)); insertSet(adjSet,(v,u));
+			case (peekMap adjList u) of 
+				SOME a => () 
+				|NONE => insertMap adjList u (newSet tempeq) ;
+			case (peekMap degree u) of
+				SOME a => ()
+				|NONE => insertMap degree u  0;
+			if not(memberSet(precolored,u)) then 
+					(insertMap adjList u (unionSet (getMap adjList u,singletonSet (tempeq ,v)));
+					insertMap degree u ((getMap degree u ) +1))
+			else ();
+			
+			case (peekMap adjList v) of 
+				SOME a => () 
+				|NONE => insertMap adjList v (newSet tempeq) ;
+			case (peekMap degree v) of
+				SOME a => ()
+				|NONE => insertMap degree v  0;
+			if not(memberSet(precolored,v)) then
+					(insertMap adjList v (unionSet (getMap adjList v,singletonSet (tempeq ,u)));
+					
+					insertMap degree v ((getMap degree v ) +1 ))
+			else ())
+			else ())
+d131 6
+a136 8
+				let val nuevoSet = fromListSet(showTemp(), tempeq);
+					(*	val _ = (print ("\nEste es el nuevo set de adyacentes a "^tempAstring(n)^":\n"); printSet(nuevoSet, tempAstring); print "\n")*)
+						val t = case (peekMap adjList n) of
+										SOME e => minusSet(getMap adjList n , unionSet(nuevoSet, coalescedNodes)) 
+										|NONE  => (newSet tempeq)
+				in
+					t
+				end
+d139 3
+a141 3
+				(case (peekMap moveList n) of 
+				SOME e=> interSet(getMap moveList n ,unionSet(activeMoves, worklistMoves))
+				|NONE => newSet(cmpInstr))  
+d146 9
+a154 4
+				forAllSet(nodes, (fn n => (forAllSet(NodeMoves n, (fn m => if (memberSet(activeMoves, m)) then
+																																	(differenceSet(activeMoves, singletonSet(cmpInstr,m));
+																																	 insertSet(worklistMoves, m))
+																																	 else ()))))) 
+d160 1
+a160 1
+						val _ =  insertMap degree m ((getMap degree m ) - 1)
+d162 3
+a164 3
+ 					if (d = K) then 
+								(EnableMoves(unionSet(singletonSet(tempeq, m), (Adjacent m)));
+								differenceSet(spillWorkList, (singletonSet(tempeq, m)));
+d166 2
+a167 2
+										insertSet(freezeWorkList,m)
+								else insertSet(simplifyWorkList, m))
+d172 7
+a178 3
+				if (not(memberSet(precolored, u)) andalso not((MoveRelated u) andalso 
+				(((getMap degree u ) handle NotFound => raise Fail ("Not found surgió en AddWorkList con el temporal "^tempAstring(u)))  < K ))) then
+						(differenceSet(freezeWorkList,singletonSet(tempeq, u)); insertSet(simplifyWorkList, u))
+d181 8
+a188 5
+		fun Ok(t,r) = let val valor = case (peekMap degree t ) of SOME e => e
+											| NONE => raise Fail ("El temporal "^(tempAstring t)^" no tiene grado, para la función Ok\n.")
+									in
+					 				(valor < K) orelse (memberSet(precolored, t)) orelse (memberSet(adjSet, (t, r)))
+									end 
+d192 4
+d197 5
+a201 7
+				(forAllSet(nodes, (fn n =>(let 
+												val valor = case (peekMap degree n) of SOME e => e
+												|NONE => raise Fail ("El temporal "^(tempAstring n)^" no tiene grado, para la función Conservative.\n") 
+																	in
+																		 if (valor >= K) then k := !k + 1
+																		 else ()
+																	end))); !k < K)
+d204 7
+a210 4
+		fun GetAlias n = if (memberSet(coalescedNodes, n)) then ( case (peekMap alias n) of
+														SOME e => (GetAlias e)
+														| NONE => raise Fail ("El temporal "^(tempAstring n)^" no tiene alias, para la función GetAlias")) 
+										 else n 
+d213 18
+a230 10
+				(if (memberSet(freezeWorkList, v)) then differenceSet(freezeWorkList, singletonSet(tempeq, v))
+					else differenceSet(spillWorkList, singletonSet(tempeq, v));
+					insertSet(coalescedNodes,v);
+					insertMap alias v  u;
+					insertMap moveList u (unionSet(findMap moveList u (newSet cmpInstr), findMap moveList v (newSet cmpInstr)));
+					EnableMoves(singletonSet(tempeq, v));
+					forAllSet(Adjacent(v), (fn t => (AddEdge(t, u); DecrementDegree(t))));
+					if ((getMap degree u ) >= K) andalso (memberSet(freezeWorkList, u)) then
+						(differenceSet(freezeWorkList, singletonSet(tempeq, u)); insertSet(spillWorkList, u))
+					else ())
+d233 26
+a258 16
+				forAllSet(NodeMoves(u), (fn m => (let  	
+								fun fuente(_ , MOVE{src, ...}) = src
+								|fuente _ = raise Fail "Existe una instrucción no move en worklistMoves"
+								fun destino(_, MOVE{dst, ...}) = dst
+								|destino _ = raise Fail "Existe una instrucción no move en worklistMoves" 
+								val (x,y) = (destino(m), fuente(m))	
+								val v = if (cmptemp(GetAlias(y),(GetAlias(u)))) then 
+															GetAlias(x) else GetAlias(y)
+								in
+								(differenceSet(activeMoves, singletonSet(cmpInstr, m));
+								insertSet(frozenMoves, m);
+								if isEmptySet(NodeMoves(v)) andalso ((getMap degree v ) < K) then 
+											(differenceSet(freezeWorkList, singletonSet(tempeq, v)); insertSet(simplifyWorkList,v))
+								else ())
+								end )))
+		fun invariant() =
+d271 6
+a276 2
+						val listaInstr = ListPair.zip (upto(1,List.length (!(bloqueInstrucciones))), List.rev(!(bloqueInstrucciones)))
+						val liveInOut = Liveness (!(bloqueInstrucciones))
+a277 1
+						val _ = addListSet(live, [rv,fp,sp]@@calleesaves)
+d279 26
+a304 23
+				(List.app (fn  (ind, I) =>	let 
+															val (useI, defI) = (use I , def I) 
+															val useDef = unionSet(useI, defI)		
+															(*val _=(case I of
+																		OPER{jump = SOME [etiqueta], ...}  =>  
+																						(live:= !(newSet tempeq);
+																						addSet(live,#2(findMap liveInOut ind (newSet tempeq, newSet tempeq))))
+																		| _ => ())  	*)
+														in
+														   ( if isMoveInstruction I then 
+																	(differenceSet(live, useI);
+																	forAllSet (useDef, (fn x => 
+																	((case (peekMap moveList x) of
+																	SOME a => insertSet((findMap moveList x (newSet cmpInstr)), (ind, I))
+																	|NONE => insertMap moveList x (singletonSet (cmpInstr, (ind, I))));
+																	insertSet(worklistMoves, (ind,I))))))
+																	else ();
+																	addSet(live, defI);
+																	forAllSet (defI, (fn x => forAllSet(live, (fn y => AddEdge(x, y)))));
+																	differenceSet(live, defI);
+																	addSet(live, useI)) 
+														end) listaInstr)		
+			end
+d307 11
+a317 9
+					(forAllSet(initial, (fn n => (differenceSet(initial, singletonSet(tempeq, n));
+																			if ((getMap degree n) >= K)
+															        then 
+																					insertSet(spillWorkList, n)
+																			else (if (MoveRelated n) then 
+																					insertSet(freezeWorkList,n)
+																			else
+																					insertSet(simplifyWorkList, n));
+																			())))) 
+a320 1
+					(*	val _ = (print "Entramos en simplify y vemos que hay en simplifyWorkList.\n"; printSet(simplifyWorkList, tempAstring));*) 
+d322 1
+a322 2
+            val _ = differenceSet(simplifyWorkList,singletonSet(tempeq, n))
+						(*val _ =print ("\nIngresa el temporario: "^tempAstring(n)^"\n");*)
+d325 1
+a325 2
+  					forAllSet(Adjacent n, fn m => (*print ("\n Un nodito adyacente a "^tempAstring(n)^" es: "^tempAstring(m)^"\n");*)
+						DecrementDegree m)
+d330 29
+a358 25
+					fun fuente(_ , MOVE{src, ...}) = src
+					|fuente _ = raise Fail "Existe una instrucción no move en worklistMoves"
+					fun destino(_, MOVE{dst, ...}) = dst
+					|destino _ = raise Fail "Existe una instrucción no move en worklistMoves" 
+				(*	val _ = (printSet(worklistMoves, (fn (x,y)=> (tigerassem.format tempAstring y)));print "\n")
+					val _ = (printSet(coalescedMoves, (fn (x, y) => (tigerassem.format tempAstring y)));print "\n") *)
+					val m = List.hd (listItemsSet worklistMoves)
+					val x = GetAlias(destino m)
+					val y = GetAlias(fuente m)
+					val (u,v) = if memberSet(precolored, y) then (y,x) else (x,y)
+				(*	val _ = print ("("^(tempAstring u)^", "^(tempAstring v)^")\n") *)
+					in
+						(differenceSet(worklistMoves,singletonSet(cmpInstr, m)); 
+						if (cmptemp(u,v)) then (insertSet(coalescedMoves,m);AddWorkList(u))
+								else (if (memberSet(precolored, v) orelse memberSet(adjSet, (u,v))) then
+										(insertSet(constrainedMoves, m); AddWorkList(u); AddWorkList(v))
+											else (if ((memberSet(precolored, u)) andalso 
+												(List.all (fn t => Ok(t,u)) (listItemsSet(Adjacent(v))))) orelse
+											((not(memberSet(precolored, u))) andalso Conservative(unionSet(Adjacent u, Adjacent v))) then
+												(insertSet(coalescedMoves, m);
+												Combine(u,v);
+												(*print ("haciendo coalescing de nodos:"^(tempAstring(u))^" y "^(tempAstring(v)));*)
+												AddWorkList(u)) else
+												insertSet(activeMoves, m))))
+					end 
+d362 6
+a367 4
+				let val u = List.hd (listItemsSet(freezeWorkList))
+				in
+						(differenceSet(freezeWorkList, (singletonSet(tempeq, u))); insertSet(simplifyWorkList, u); FreezeMoves(u))
+				end
+d370 6
+a375 4
+				let val m = List.hd(listItemsSet(spillWorkList))
+				in
+						(differenceSet(spillWorkList, (singletonSet(tempeq, m))); insertSet(simplifyWorkList, m); FreezeMoves(m))
+				end
+d378 27
+a404 24
+				let 
+						val _ = while (not(null(showTemp()))) do 
+									(let val n = topTemp();
+											 val _ = popTemp();
+											 val okColors = let val t= newSet(Int.compare)
+																					val _ = addSet(t, fromListSet([0,1,2,3,4,5], Int.compare))
+																					in t end
+									in 
+											(forAllSet(
+((getMap adjList n) handle NotFound => raise Fail ("NotFound surgió en AssignColor debido al temporal "^tempAstring(n))) 
+, (fn w => if (memberSet(unionSet(coloredNodes, precolored), GetAlias(w)))
+												then differenceSet(okColors, singletonSet(Int.compare, 
+(getMap color (GetAlias(w)) handle NotFound => raise Fail ("NotFound surgió en color GetAlias debido al temporal"^tempAstring(w))
+))) else ()));
+											 if (isEmptySet(okColors)) then insertSet(spilledNodes, n)
+											 else (let  val L = listItemsSet(okColors)
+																	(*val _ = List.app (fn x => print (Int.toString(x))) L
+																	val _ = print "\nComienza a elegir el color.\n"*)
+																	(*val d =Random.range (0,List.length L) (Random.newgen()) *)
+																	(*val _ = print ("\nTerminó de elegir el color "^Int.toString(d)^".\n")*)
+																	val c = List.hd(L)(*List.nth (L, d)	*)
+														in (insertSet(coloredNodes, n); insertMap color n c) end
+												))
+									 end)
+d406 8
+a413 2
+					forAllSet(coalescedNodes,(fn n => insertMap color n (getMap color (GetAlias (n)))))
+			end 		 
+d423 13
+a435 9
+					val newTemps = newSet(tempeq)	
+
+					fun use(reg, OPER{src, ...}) = List.exists (fn x => cmptemp(reg, x)) src
+					|use(reg, MOVE{src, ...}) = cmptemp(reg, src)
+					|use(reg, LABEL{...}) = false 
+
+					fun definition(reg, OPER{dst, ...}) = List.exists (fn x => cmptemp(reg, x)) dst
+					|definition(reg, MOVE{dst, ...}) = cmptemp(reg, dst)
+					|definition(reg, LABEL{...}) = false
+d437 8
+a444 6
+					fun cambiarDestino(reg, temporal, OPER{assem, dst, src, jump}) = 
+							OPER{assem=assem, dst= List.map (fn x => if cmptemp(x, reg) then temporal else x) dst,
+							src=src, jump=jump}
+					|cambiarDestino(reg, temporal, MOVE{assem, src, dst}) = 
+						  MOVE{assem=assem, dst=temporal, src=src}
+					|cambiarDestino _ = raise Fail "Error: Se trata de cambiar el campo dst en un LABEL.\n"
+d446 7
+a452 6
+					fun cambiarFuente(reg, temporal, OPER{assem, dst, src, jump}) =
+							OPER{assem=assem, dst=dst, src=List.map (fn x => if cmptemp(x, reg) then temporal else x) src,
+							jump = jump}
+					|cambiarFuente(reg, temporal, MOVE{assem, dst, src}) = 
+							MOVE{assem=assem, dst=dst, src=temporal}
+					|cambiarFuente _ = raise Fail "Error: Se trata de cambiar el campo src en un LABEL.\n"
+d454 6
+a459 4
+					fun fetch (posicion, temporal) = OPER{assem = "movl "^itoa(posicion)^"(%`s0), %`d0 #91\n",
+							dst = [temporal], src = [fp], jump=NONE}
+					fun store (posicion, temporal) = OPER{assem = "movl %`s0, "^itoa(posicion)^"(%`s1) #92\n",
+							dst = [], src = [temporal,fp], jump=NONE}
+d461 21
+a481 23
+					fun reescritura (v,pos, []) = [] 
+					|reescritura (v,pos, x::xs) = 
+						if (use(v, x)) then 
+								let  
+										val temporal = newtemp()
+										val _ = print("Se creó el temporal "^tempAstring(temporal)^"para usarlo\n")
+										val _ = insertSet(newTemps, temporal)
+										(*val _ = print ("El temporal "^tempAstring(v)^" es reemplazado por: "^tempAstring(temporal)^"\n")
+										val _ = print (tigerassem.format tigertemp.tempAstring (fetch(pos, temporal)))			*)
+								in
+										(fetch(pos, temporal)::(cambiarFuente(v, temporal,x))::(reescritura(v,pos, xs)))
+								end
+						else if (definition(v, x)) then
+								let
+										val temporal = newtemp()
+										val _ = print("Se creó el temporal "^tempAstring(temporal)^"para definirlo\n")
+										val _ = insertSet(newTemps, temporal)
+										(*val _ = print ("El temporal "^tempAstring(v)^" es reemplazado por: "^tempAstring(temporal)^"\n")
+										val _ =print (tigerassem.format tigertemp.tempAstring (store(pos, temporal)))*)
+								in
+										(cambiarDestino(v, temporal, x)::(store(pos, temporal))::(reescritura(v,pos, xs)))
+								end
+						else (x::(reescritura(v,pos, xs)))
+d483 18
+a500 39
+					fun help (v, lista) =
+							let
+								val pos = case  (allocLocal  (!nuevoMarco) true) of InFrame e => (*(print ("El valor en el frame es: "^Int.toString(e)^", y el temporal es: "^tempAstring(v)^"\n");*) 
+e 
+								|InReg e => raise Fail "Error en la alocación de RewriteProgram\n"
+							in
+								reescritura (v, pos, lista)
+						end		
+					(*val _ = printSets() 
+					val _ =(print ("El programa que recibe la reescritura es:\n"); 
+									List.app (fn x => print (format tempAstring x)) (!bloqueInstrucciones);
+									print "\n")*)
+				  val _ = (print "\nEstos son los nodos que van a spill\n"; printSet(spilledNodes, tempAstring); print "\n-->\n")	
+					val _ = bloqueInstrucciones:=  List.foldr help (!bloqueInstrucciones) (listItemsSet spilledNodes)
+				  val spilled = listItemsSet spilledNodes 
+					val _ = List.app (fn n => forAllMap (fn (x,y) =>differenceSet(y, singletonSet(tempeq, n))) adjList) spilled 	
+				(*	val _ = printSets() 
+					val _ =(print ("El nuevo programa luego de la reescritura es:\n"); 
+									List.app (fn x => print (format tempAstring x)) (!bloqueInstrucciones);
+									print "\n")*)
+					val _ = setEmptySet(spilledNodes)
+					val _ = setEmptySet(initial)
+					val _ = addSet(initial, coloredNodes)
+					val _ = addSet(initial, coalescedNodes)
+					val _ = addSet(initial, newTemps) 	
+					val _ = setEmptySet(coloredNodes)
+					val _ = setEmptySet(coalescedNodes)
+				(*	val _ = (	print ("Lista de adyacencia:\n");
+					printMap (fn (t,c)=>(print ("adj["^(tempAstring t) ^ "] := ");printSet(c,tempAstring);print("\n"))) adjList)
+					val _ =  printAdjSet () 
+					val _ = adjList := !(newMap tempeq)*)
+					val _ = List.app (fn n => forAllSet (adjSet,(fn (x, y) => if ((tempeq(x,n)=EQUAL) orelse (tempeq(y,n)=EQUAL)) 
+				 then differenceSet(adjSet, singletonSet(temptupla, (x,y))) else () ))) spilled
+				(*	val _ = adjSet := !(newSet temptupla)
+					val _ = (print "\nNuevos temporales: \n"; printSet(newTemps, tempAstring); print "\n")
+					val _ = (print "\nEstos son los sets después de Rewrite:\n"; printSets())*)
+			in
+				()	
+			end
+d503 6
+a508 4
+				let
+						fun registro(x) = (*print ("El temporal "^tempAstring(x)^" tiene el color "^Int.toString(findMap color x 0));*)
+								List.nth (listaDeRegistros, (getMap color x ))
+						fun pintar(OPER{assem, dst, src,  jump}) = OPER{assem=assem, dst=List.map registro dst,
+d510 5
+a514 5
+						|pintar(MOVE{assem, dst, src}) = MOVE{assem=assem, dst=registro dst, src=registro src}
+						|pintar e = e
+				in
+						(bloqueInstrucciones:= List.map pintar(!bloqueInstrucciones))
+				end
+d524 1
+a524 1
+		fun repeat() = ((*print "Estos son los conjuntos antes de iter:\n"; printSets();*)
+a525 1
+			(*print "Estos son los conjuntos después de iter:\n"; printSets();*)
+d530 2
+a531 2
+			(Build();invariant();(*printAdjSet();*)MakeWorklist (); 
+				  (*(print "\nEstos son los nodos que van a spill después de Work List\n"; printSet(spilledNodes, tempAstring); print "\n-->\n");*)	
+a532 5
+			(*print ("Lista de adyacencia:\n");
+			printMap (fn (t,c)=>(print ("adj["^(tempAstring t) ^ "] := ");printSet(c,tempAstring);print("\n"))) adjList;
+*)	
+			(*print"Estos son los conjuntos después de repeat:\n";printSets();
+		  print "\nEstos son los nodos que van a spill después de Repeat\n"; printSet(spilledNodes, tempAstring); print "\n-->\n");*)	
+a533 1
+				 (* (print "\nEstos son los nodos que van a spill después de Assign Color\n"; printSet(spilledNodes, tempAstring); print "\n-->\n");*)	
+a540 3
+(*	print ("Lista de adyacencia:\n");
+	printMap (fn (t,c)=>(print ("adj["^(tempAstring t) ^ "] := ");printSet(c,tempAstring);print("\n"))) adjList;
+	*)
+a541 2
+	(*print ("Los colores:\n");
+	printMap (fn (c,v) => print ((tempAstring c) ^ " : " ^ (Int.toString v) ^" | ")) color; *)
+@
+
+
+1.5
+log
+@Versión Número 5 de Tigerreg. En esta versión he cambiado el mapa degree, no inserta más referencias, sino valores; asimismo alias también inserta temporales en vez de referencia a valores. Todavía no compila queens ni merge, pero ya compila funciones recursivas simples como factorial.
+@
+text
+@d10 1
+a68 7
+    fun equalMap (mp1, mp2) =
+          let val l1 = listItemsMap mp1
+              val l2 = listItemsMap mp2
+              fun eq ((i1, (in1, out1)), (i2, (in2, out2))) =((i1=i2) andalso equalSet(in1, in2) andalso equalSet (out1,out2))
+          in
+              ListPair.all eq (l1, l2)
+          end
+a85 8
+		fun equalMap (mp1, mp2) = 
+					let val l1 = listItemsMap mp1
+							val l2 = listItemsMap mp2
+							fun eq ((i1, (in1, out1)), (i2, (in2, out2))) = (i1=i2) andalso equalSet(in1, in2) andalso equalSet (out1,out2) 
+					in
+							ListPair.all eq (l1, l2)
+					end 
+
+a89 7
+		fun use (OPER {src, ...}) = fromListSet(src, tempeq)
+		|use (LABEL{...}) = newSet tempeq
+		|use (MOVE{src, ...}) = fromListSet([src], tempeq)	
+		
+	 	fun def (OPER {dst, ...}) = fromListSet(dst, tempeq)
+		|def (LABEL{...}) = newSet tempeq
+		|def (MOVE{dst,...}) = fromListSet([dst], tempeq)
+d133 1
+d170 2
+a171 1
+				if (not(memberSet(precolored, u)) andalso not((MoveRelated u) andalso ((getMap degree u ) < K ))) then
+d226 8
+a233 1
+							
+a236 44
+		fun Liveness block = 
+			let 
+					val liveInOut = newMap Int.compare
+					val liveInOut' = newMap Int.compare
+					val indices = upto(1,List.length block)
+					val instr = ListPair.zip (indices, block)
+					val _ = List.app (fn x => (insertMap liveInOut x (newSet tempeq, newSet tempeq);
+																	 insertMap liveInOut' x (newSet tempeq, newSet tempeq))) indices
+					fun sucesor (i,OPER{jump=SOME [etiqueta], ...}) = 
+						let val next = if i < List.length block then [i+1] else []
+								fun isLabel (_, LABEL{lab, ...}) = (labelAstring lab) = (labelAstring etiqueta)
+											|isLabel _ = false
+								val salto = case List.find isLabel instr of SOME (i, _) => [i]
+															| NONE => raise Fail "etiqueta no encontrada\n"
+						in 
+								salto@@next
+						end
+					| sucesor (i, _ ) = if i < (List.length block) then [i+1] else []   
+									
+					val _ = List.app (fn (x,y) => 
+					(#1(getMap liveInOut' x ):= !(#1(getMap liveInOut x ));
+					#2(getMap liveInOut' x ):= !(#2(getMap liveInOut x ));
+					#1(getMap liveInOut x ):=  !(unionSet(use y,
+					minusSet(#2(getMap liveInOut x ), def y)));
+					List.app (fn n => #2(getMap liveInOut x):= !(unionSet(#2(getMap liveInOut x ), #1(getMap liveInOut n ))))
+																					(sucesor (x,y))	)) instr
+				
+			in
+				(while ((equalMap(liveInOut,liveInOut')) <> true) do 
+					List.app (fn (x,y) => (#1(getMap liveInOut' x ):= !(#1(getMap liveInOut x ));
+																					 #2(getMap liveInOut' x ):= !(#2(getMap liveInOut x ));
+																					 #1(getMap liveInOut x ):= !(unionSet(use y,
+																								 minusSet(#2(getMap liveInOut x ), def y)));
+																					List.app (fn n => #2(getMap liveInOut x):= !(unionSet(#2(getMap liveInOut x ), #1(getMap liveInOut n ))))
+																					(sucesor (x,y))	)) instr;
+							(*									print "\nUn liveness: ";
+															 List.app (fn x =>(print ("\n"^Int.toString(x)) ;
+															print "\nIn: \n"; printSet((#1(getMap liveInOut x)), tempAstring);
+															print "\nOut: \n"; printSet((#2(getMap liveInOut x )), tempAstring))) indices ;
+														 print "\nEstos son los sets después del Liveness:\n";	
+														 printSets();*)
+														 liveInOut) 
+			end
+
+d263 2
+a264 1
+																	live:=(!(unionSet(useI,(minusSet(live, defI)))))) 
+d280 2
+a281 1
+				let 
+d284 1
+d287 2
+a288 1
+  					forAllSet(Adjacent n, (fn m => DecrementDegree m))
+d338 1
+a338 1
+																					val _ = addSet(t, fromListSet([5,4,3,2,1,0], Int.compare))
+d341 6
+a346 2
+											(forAllSet(getMap adjList n, (fn w => if (memberSet(unionSet(coloredNodes, precolored), GetAlias(w)))
+												then differenceSet(okColors, singletonSet(Int.compare, getMap color (GetAlias(w)))) else ()));
+d403 1
+d413 1
+d430 5
+a434 1
+					
+d436 2
+a437 1
+					
+d442 2
+a443 2
+					val _ = spilledNodes := !(newSet (tempeq)) 
+					val _ = initial := !(newSet (tempeq))
+d447 10
+a456 3
+					val _ = coloredNodes := !(newSet (tempeq))
+					val _ = coalescedNodes := !(newSet (tempeq))
+				(*	val _ = (print "\nNuevos temporales: \n"; printSet(newTemps, tempAstring); print "\n")
+d482 3
+a484 1
+		fun repeat() = (iter();
+d489 2
+a490 1
+			(Build();(*printAdjSet();*)MakeWorklist (); 
+d492 8
+a499 1
+			AssignColor(); if isEmptySet(spilledNodes) then () else 
+d505 1
+a505 1
+	(principal();
+d514 1
+a514 1
+	) 
+@
+
+
+1.4
+log
+@Versión número 4 de Tigerreg. Utiliza Int.mod y Random.random para generar números aleatorios para el coloreo.
+@
+text
+@d15 1
+a15 1
+		val listaDeRegistros = [ rv, ov,  stringAtemp "ebx", stringAtemp "ecx", stringAtemp "esi", stringAtemp "edi", fp, sp]  
+d32 1
+a32 2
+		val precolored = fromListSet([fp, rv, sp, ov, stringAtemp "ebx", stringAtemp "ecx", 
+			stringAtemp "esi", stringAtemp "edi"], tempeq);
+d49 1
+a49 1
+		val K = 6 
+d54 3
+a56 3
+		val _ = List.app (fn x => (insertMap degree x (ref (case Int.maxInt of SOME e => e
+																														| NONE =>  raise Fail "¡Error: mosml no tiene entero máximo!"))
+										)) [fp, rv, sp, ov, stringAtemp "ebx", stringAtemp "ecx", stringAtemp "esi", stringAtemp "edi"]
+a58 8
+		val _ = insertMap color fp 6
+		val _ = insertMap color sp 7
+		val _ = insertMap color rv 0 
+		val _ = insertMap color ov 1 
+		val _ = insertMap color (stringAtemp "ebx") 2 
+		val _ = insertMap color (stringAtemp "ecx") 3 
+		val _ = insertMap color (stringAtemp "esi") 4 
+		val _ = insertMap color (stringAtemp "edi") 5 
+d64 3
+d123 1
+a123 1
+		
+d133 1
+a133 1
+				|NONE => insertMap degree u (ref 0);
+d135 2
+a136 2
+					(insertSet(getMap adjList u , v);
+					insertMap degree u (ref (!(getMap degree u ) +1)))
+d144 1
+a144 1
+				|NONE => insertMap degree v (ref 0);
+d146 3
+a148 2
+					(insertSet(getMap adjList v  , u);
+					insertMap degree v (ref(!(getMap degree v ) +1 )))
+d154 3
+a156 3
+						val _ = case (peekMap adjList n) of
+										SOME e => differenceSet(getMap adjList n , unionSet(nuevoSet, coalescedNodes)) 
+										|NONE  => insertMap adjList n (newSet tempeq)
+d158 1
+a158 1
+					getMap adjList n  
+d174 14
+a187 8
+				(getMap degree m := !(getMap degree m ) - 1;
+ 				if (!(getMap degree m ) = K) then 
+							(EnableMoves(unionSet(singletonSet(tempeq, m), (Adjacent m)));
+							differenceSet(spillWorkList, (singletonSet(tempeq, m)));
+							if (MoveRelated m) then 
+									insertSet(freezeWorkList,m)
+							else insertSet(simplifyWorkList, m))
+				else ()) 
+d190 1
+a190 1
+				if (not(memberSet(precolored, u)) andalso not((MoveRelated u) andalso (!(getMap degree u ) < K ))) then
+d194 1
+a194 1
+		fun Ok(t,r) = let val valor = case (peekMap degree t ) of SOME e => !e
+d204 1
+a204 1
+												val valor = case (peekMap degree n) of SOME e => !e
+d213 1
+a213 1
+														SOME e => (GetAlias(!e))
+d221 1
+a221 1
+					insertMap alias v (ref u);
+d225 1
+a225 1
+					if (!(getMap degree u ) >= K) andalso (memberSet(freezeWorkList, u)) then
+d241 1
+a241 1
+								if isEmptySet(NodeMoves(v)) andalso (!(getMap degree v ) < K) then 
+d284 1
+a284 1
+		(*														print "\nUn liveness: ";
+d288 3
+a290 1
+			*)												 liveInOut)
+d297 2
+a298 1
+						val (live, vacuum) = (newSet tempeq, newSet tempeq)
+d303 5
+a307 12
+															val _=(case I of
+																		OPER{jump = SOME [etiqueta], ...}  => (let 
+																					fun isLabel (_, LABEL{lab, ...}) = (labelAstring lab) = (labelAstring etiqueta)
+																							|isLabel _ = false
+																					val salto = case List.find isLabel listaInstr of SOME (i, _) => i
+																						| NONE => raise Fail "etiqueta no encontrada\n"
+																					in
+																						(live, vacuum) = (findMap liveInOut salto (newSet tempeq, newSet tempeq))
+																					end)
+																		|OPER{...} => (live, vacuum) = getMap liveInOut ind  	
+																		|MOVE{...} => (live, vacuum) = getMap liveInOut ind  	
+																		|LABEL{...} => (live, vacuum) = getMap liveInOut ind ) 	
+d325 1
+a325 1
+																			if (!(getMap degree n) >= K)
+d335 7
+a341 3
+				forAllSet(simplifyWorkList, (fn n => (differenceSet(simplifyWorkList,singletonSet(tempeq, n));
+																		pushTemp n;	
+																		forAllSet(Adjacent n, (fn m => DecrementDegree m)))))
+d361 3
+a363 3
+											else (if (memberSet(precolored, u)) andalso 
+												(List.all (fn t => Ok(t,u)) (listItemsSet(Adjacent(v)))) orelse
+												(not(memberSet(precolored, u))) andalso Conservative(unionSet(Adjacent u, Adjacent v)) then
+d365 3
+a367 1
+												Combine(u,v); AddWorkList(u)) else
+d385 1
+a385 1
+				let (*val _ = printSets();*)
+d389 3
+a391 1
+											 val okColors = fromListSet([0,1,2,3,4,5], Int.compare)
+d397 5
+a401 1
+																	val c = List.nth (L,Int.mod(Real.trunc(Random.random(Random.newgen())), (List.length L))) 
+d417 1
+a417 1
+					val newTemps = newSet(tempeq)
+d441 1
+a441 1
+					fun fetch (posicion, temporal) = OPER{assem = "movl "^itoa(posicion)^"(%`s0), %`d0\n",
+d443 2
+a444 2
+					fun store (posicion, temporal) = OPER{assem = "movl %`s0, "^itoa(posicion)^"(%`d0)\n",
+							dst = [fp], src = [temporal], jump=NONE}
+d452 2
+d461 2
+d470 2
+a471 1
+								val pos = case  (allocLocal  (!nuevoMarco) true) of InFrame e => e 
+d475 1
+a475 1
+							end		
+d479 4
+a482 1
+					(*val _ = printSets() *)
+d484 1
+d490 2
+a491 1
+					(*val _ = printSets()*)
+d493 1
+a493 1
+				(!bloqueInstrucciones)	
+d521 1
+a521 1
+			(Build(); MakeWorklist (); 
+d530 6
+a535 1
+	Colorear();
+@
+
+
+1.3
+log
+@Una versión que tiene excepciones NotFound.
+@
+text
+@d15 1
+a15 1
+		val listaDeRegistros = [fp, rv, ov, sp, stringAtemp "ebx", stringAtemp "ecx", stringAtemp "esi", stringAtemp "edi"]  
+d32 2
+a33 1
+		val precolored = fromListSet([fp, rv, sp, ov, stringAtemp "ebx", stringAtemp "ecx", stringAtemp "esi", stringAtemp "edi"], tempeq) 
+d50 1
+a50 1
+		val K = 8
+d57 2
+a58 1
+																												)) [fp, rv, sp, ov, stringAtemp "ebx", stringAtemp "ecx", stringAtemp "esi", stringAtemp "edi"]
+d60 8
+a67 8
+		val _ = insertMap color fp (ref 0) 
+		val _ = insertMap color rv (ref 1) 
+		val _ = insertMap color ov (ref 2) 
+		val _ = insertMap color sp (ref 3) 
+		val _ = insertMap color (stringAtemp "ebx") (ref 4) 
+		val _ = insertMap color (stringAtemp "ecx") (ref 5) 
+		val _ = insertMap color (stringAtemp "esi") (ref 6) 
+		val _ = insertMap color (stringAtemp "edi")  (ref 7) 
+d74 24
+d118 11
+a128 2
+		val _ = (List.app (fn x => (addSet(initial, use x); addSet(initial, def x))) (!bloqueInstrucciones);
+						differenceSet(initial, precolored))
+d132 1
+a132 1
+			(if (not(memberSet(adjSet,(u,v)))	andalso (tempeq(u,v) <> EQUAL)) then
+d142 1
+a142 1
+					findMap degree u (ref 0):= !(findMap degree u (ref 0 )) +1)
+d153 1
+a153 1
+					findMap degree v (ref 0):= !(findMap degree v (ref 0)) +1 )
+d159 3
+a161 1
+						val _ = differenceSet(getMap adjList n , unionSet(nuevoSet, coalescedNodes)) 
+d167 3
+a169 1
+				interSet(getMap moveList n ,unionSet(activeMoves, worklistMoves))  
+d206 1
+a206 1
+																		 if (valor < K) then k := !k + 1
+d220 2
+a221 4
+					case (peekMap alias v) of
+					SOME e => e:=u
+					|NONE => insertMap alias v (ref u);
+					addSet(findMap moveList u (newSet cmpInstr), findMap moveList v (newSet cmpInstr));
+d235 1
+a235 1
+								val v = if (tempAstring(GetAlias(y)) = tempAstring(GetAlias(x))) then 
+d270 1
+a270 1
+					addSet(#1(getMap liveInOut x ), unionSet(use y,
+d272 1
+a272 1
+					List.app (fn n => addSet(#2(getMap liveInOut x ), #1(getMap liveInOut n )))
+d276 1
+a276 2
+				(while (not(equalMap(liveInOut,liveInOut'))) do
+							
+d279 1
+a279 1
+																					 addSet(#1(getMap liveInOut x ), unionSet(use y,
+d281 1
+a281 1
+																					List.app (fn n => addSet(#2(getMap liveInOut x ), #1(getMap liveInOut n )))
+d283 5
+a287 1
+															 liveInOut)
+d290 1
+a290 1
+		fun Build block =
+d292 2
+a293 2
+						val listaInstr = ListPair.zip (upto(1,List.length block), block)
+						val liveInOut = Liveness (rev block)
+d327 3
+a329 2
+ 					(forAllSet(initial, (fn n => (differenceSet(initial, singletonSet(tempeq, n));
+																			if (!(getMap degree n) >= K) then 
+d335 1
+a335 3
+																			())))(*; print "SpillWorkList: "; printSet(spillWorkList, tempAstring); print("\n"); 
+																						 print "FreezeWorkList: "; printSet(freezeWorkList, tempAstring); print("\n"); 
+																						 print "SimplifyWorkList: "; printSet(simplifyWorkList, tempAstring); print "\n"*) )		 
+d357 1
+a357 1
+						if (tempeq(u,v) = EQUAL) then (insertSet(coalescedMoves,m);AddWorkList(u))
+d382 18
+a399 18
+			while (not(List.null(showTemp()))) do
+					(let val n = topTemp ()
+							 val _ = popTemp ()
+							 val okColors = fromListSet(upto(0, K-1),Int.compare)
+					in 
+							(forAllSet(getMap adjList n , (fn w => 
+											(if (memberSet(unionSet(coloredNodes, precolored),GetAlias(w))) then
+											 differenceSet(okColors, (singletonSet (Int.compare,!(getMap color (GetAlias (w)) ))))
+									else ())));
+							if (isEmptySet(okColors)) then 
+									((*print ("El registro "^(tempAstring n)^" va a spill\n"); *)
+									insertSet(spilledNodes, n))
+							else 
+									(let val c = List.hd (listItemsSet(okColors))
+									 in (insertSet(coloredNodes, n); insertMap color n (ref c)) 
+									end);
+							forAllSet(coalescedNodes, (fn n => insertMap color n (findMap color (GetAlias n) (ref 5)))))
+					 end)
+d432 4
+a435 4
+					fun fetch (posicion, temporal) = MOVE{assem = "movl "^itoa(posicion)^"(%`s0), %`d0\n",
+							dst = temporal, src = fp}
+					fun store (posicion, temporal) = MOVE{assem = "movl %`s0, "^itoa(posicion)^"(%`d0)\n",
+							dst = fp, src = temporal}
+d437 2
+a438 2
+					fun reescritura (v, []) = [] 
+					|reescritura (v, x::xs) = 
+a440 2
+										val pos = case  (allocLocal  (!nuevoMarco) true) of InFrame e => e 
+											|InReg e => raise Fail "Error en la alocación de RewriteProgram\n"
+d444 1
+a444 1
+										(fetch(pos, temporal)::(cambiarFuente(v, temporal,x))::(reescritura(v, xs)))
+a447 2
+										val pos = case  (allocLocal  (!nuevoMarco) true) of InFrame e => e 
+											|InReg e => raise Fail "Error en la alocación de RewriteProgram\n"
+d451 1
+a451 1
+										(cambiarDestino(v, temporal, x)::(store(pos, temporal))::(reescritura(v, xs)))
+d453 1
+a453 1
+						else (x::(reescritura(v, xs)))
+d456 6
+a461 1
+							reescritura (v, lista)
+d464 2
+a465 1
+ 
+d467 3
+a469 2
+					val _ = initial := !(newSet (tempeq))
+					val initial = unionSet(coloredNodes, unionSet(coalescedNodes, newTemps)) 
+d472 1
+d478 3
+a480 2
+				let 
+						fun registro(x) = List.nth (listaDeRegistros, !(getMap color x))
+d491 1
+a491 1
+						fun eliminar(MOVE{assem, dst, src}) = if cmptemp(dst,src) then false else true
+d497 10
+d510 4
+a513 12
+	(Build(rev (!(bloqueInstrucciones))); MakeWorklist ();iter();
+ 	while (not((isEmptySet(simplifyWorkList)) andalso (isEmptySet(worklistMoves)) 
+					andalso (isEmptySet(freezeWorkList)) andalso (isEmptySet(spillWorkList)))) do
+				 iter(); AssignColor ();
+	(*print "\nNodos que serán \"spilled\":\n "; printSet(spilledNodes, tempAstring);
+ 	print "\nNodos que serán \"coloreados\":\n ";
+	forAllSet(coloredNodes, (fn n => print("Nodo: "^(tempAstring n)^" tiene el color: "^
+	Int.toString(!(getMap color n ))^"\n")));
+	print "\nNodos que serán \"coalescidos\":\n"; 
+	printSet(coalescedNodes, tempAstring);*)
+	if (isEmptySet(spilledNodes)) then (Colorear(); Coalescer();
+	procEntryExit3(!nuevoMarco,!bloqueInstrucciones)) else (RewriteProgram(); coloreo(!nuevoMarco, !bloqueInstrucciones))
+@
+
+
+1.2
+log
+@Versión que no tiene completamente el findMap con neutro.
+@
+text
+@d15 1
+d17 1
+a23 1
+		val moveList = newMap tempeq
+a25 1
+		val initial = newSet tempeq
+d29 1
+d32 3
+a34 2
+		val precolored = fromListSet([fp, rv, ov, sp], tempeq) 
+		val coalescedNodes = newSet tempeq
+d49 1
+a49 1
+		val K = 6
+d56 1
+a56 1
+																												)) [fp, rv, sp, ov]
+d58 9
+d106 2
+a107 2
+					(insertSet(findMap adjList u (newSet tempeq), u);
+					findMap degree u := !(findMap degree u) +1)
+d117 2
+a118 2
+					(insertSet(findMap adjList v (newSet tempeq) , v);
+					findMap degree v (newSet tempeq):= !(findMap degree v (newSet tempeq)) +1 )
+d124 1
+a124 1
+						val _ = differenceSet(findMap adjList n, unionSet(nuevoSet, coalescedNodes)) 
+d126 1
+a126 1
+					findMap adjList n 
+d130 1
+a130 1
+				interSet((findMap moveList n),unionSet(activeMoves, worklistMoves))  
+d132 1
+a132 1
+		fun MoveRelated n = isEmptySet(NodeMoves n)	
+d136 1
+a136 1
+																																	(insertSet(activeMoves, m);
+d140 2
+a141 2
+				(findMap degree m := !(findMap degree m) - 1;
+ 				if (!(findMap degree m) = K) then 
+d150 2
+a151 2
+				if (not(memberSet(precolored, u)) andalso not((MoveRelated u) andalso (!(findMap degree u) < K ))) then
+						(insertSet(freezeWorkList,u); insertSet(simplifyWorkList, u))
+d155 1
+a155 1
+																	| NONE => raise Fail ("El temporal "^(tempAstring t)^" no tiene grado, para la función Ok\n.")
+d164 2
+a165 2
+																			val valor = case (peekMap degree n) of SOME e => !e
+																			|NONE => raise Fail ("El temporal "^(tempAstring n)^" no tiene grado, para la función Conservative.\n") 
+d173 2
+a174 2
+																											SOME e => (GetAlias(!e))
+																											| NONE => raise Fail ("El temporal "^(tempAstring n)^" no tiene alias, para la función GetAlias")) 
+d181 4
+a184 2
+					findMap alias v := u;
+					addSet(findMap moveList u, findMap moveList v);
+d187 1
+a187 1
+					if (!(findMap degree u) >= K) andalso (memberSet(freezeWorkList, u)) then
+d203 1
+a203 1
+								if isEmptySet(NodeMoves(v)) andalso (!(findMap degree v) < K) then 
+d230 6
+a235 5
+					val _ = List.app (fn (x,y) => (#1(findMap liveInOut' x):= !(#1(findMap liveInOut x));
+																					 #2(findMap liveInOut' x):= !(#2(findMap liveInOut x));
+																					 addSet(#1(findMap liveInOut x), unionSet(use y,
+																								 minusSet(#2(findMap liveInOut x), def y)));
+																					List.app (fn n => addSet(#2(findMap liveInOut x), #1(findMap liveInOut n)))
+d241 5
+a245 5
+					List.app (fn (x,y) => (#1(findMap liveInOut' x):= !(#1(findMap liveInOut x));
+																					 #2(findMap liveInOut' x):= !(#2(findMap liveInOut x));
+																					 addSet(#1(findMap liveInOut x), unionSet(use y,
+																								 minusSet(#2(findMap liveInOut x), def y)));
+																					List.app (fn n => addSet(#2(findMap liveInOut x), #1(findMap liveInOut n)))
+d247 1
+a247 4
+			(*	List.app (fn (x,y) => (	print "In: "; printSet(#1(findMap liveInOut x), tempAstring); 
+																print "Out: "; printSet(#2(findMap liveInOut x),tempAstring);
+																print "\n")
+															) instr;*) liveInOut)
+d266 1
+a266 1
+																						(live, vacuum) = (findMap liveInOut salto)
+d268 3
+a270 3
+																		|OPER{...} => (live, vacuum) = (findMap liveInOut ind) 	
+																		|MOVE{...} => (live, vacuum) = (findMap liveInOut ind) 	
+																		|LABEL{...} => (live, vacuum) = (findMap liveInOut ind)) 	
+d276 1
+a276 1
+																	SOME a => insertSet((findMap moveList x), (ind, I))
+d288 1
+a288 1
+																			if (!(findMap degree n) >= K) then 
+d294 3
+a296 1
+																			()))); printSet(spillWorkList, tempAstring); print("\n"); printSet(freezeWorkList, tempAstring); print("\n"); printSet(simplifyWorkList, tempAstring); print "\n" )		 
+a299 1
+																		Adjacent n;
+d301 1
+a301 1
+																		forAllSet(findMap adjList n, (fn m => DecrementDegree m)))))
+d309 2
+d315 1
+d333 1
+a333 1
+						(deleteSet(freezeWorkList, u); insertSet(simplifyWorkList, u); FreezeMoves(u))
+d339 1
+a339 1
+						(deleteSet(spillWorkList, m); insertSet(simplifyWorkList, m); FreezeMoves(m))
+d343 1
+a343 1
+			while (null(showTemp())) do
+d348 3
+a350 3
+							(forAllSet(findMap adjList n, (fn w => 
+									(if (memberSet(unionSet(coloredNodes, precolored),GetAlias(w))) then
+											 deleteSet(okColors, !(findMap color (GetAlias (w))))
+d353 2
+a354 1
+									insertSet(spilledNodes, n)
+d357 1
+a357 1
+									 in (insertSet(coloredNodes, n); findMap color n := c) 
+d359 96
+a454 3
+							forAllSet(coalescedNodes, (fn n => findMap color n := !(findMap color (GetAlias n)))))
+					end)
+							
+d456 13
+a468 5
+	(Build(rev (!(bloqueInstrucciones))); MakeWorklist ();
+	if (not(isEmptySet(simplifyWorkList))) then Simplify ()
+	else if (not(isEmptySet(worklistMoves))) then Coalesce ()
+	else if (not(isEmptySet(freezeWorkList))) then Freeze ()
+	else if (not(isEmptySet(spillWorkList))) then SelectSpill () else ())			 	
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d18 1
+a58 4
+		(* Las primeras funciones son para implementar membresía y intersección de lista, obviamente son lentas, además me parece 
+		que representar las listas de los diversos tipos de moves por listas no es lo mejor. *)
+
+
+d95 1
+a95 1
+					(insertSet(findMap adjList u, u);
+d106 2
+a107 2
+					(insertSet(findMap adjList v , v);
+					findMap degree v := !(findMap degree v) +1 )
+d132 1
+a132 1
+							deleteSet(spillWorkList, m);
+d143 5
+a147 1
+		fun Ok(t,r) = ((!(findMap degree t) < K) orelse (memberSet(precolored, t)) orelse (memberSet(adjSet, (t, r))))
+d152 7
+a158 2
+				(forAllSet(nodes, (fn n => if (!(findMap degree n) < K) then k := !k + 1
+																	else ())); !k < K)
+d161 3
+a163 1
+		fun GetAlias n = if (memberSet(coalescedNodes, n)) then GetAlias(!(findMap alias n)) 
+d167 2
+a168 2
+				(if (memberSet(freezeWorkList, v)) then deleteSet(freezeWorkList, v)
+					else deleteSet(spillWorkList, v);
+d175 1
+a175 1
+						(deleteSet(freezeWorkList, u); insertSet(spillWorkList, u))
+d188 1
+a188 1
+								(deleteSet(activeMoves, m);
+d191 1
+a191 1
+											(deleteSet(freezeWorkList,v); insertSet(simplifyWorkList,v))
+d276 1
+a276 1
+ 					(printSet(initial, tempAstring);forAllSet(initial, (fn n => (deleteSet(initial, n);
+d283 1
+a283 1
+																			())));() )		 
+d286 1
+a286 1
+				forAllSet(simplifyWorkList, (fn n => (deleteSet(simplifyWorkList,n);
+d302 1
+a302 1
+						(deleteSet(worklistMoves,m); 
+d347 1
+a347 1
+	(Build(rev (!(bloqueInstrucciones))); MakeWorklist;
+d349 2
+a350 2
+	else (*if (not(isEmptySet(worklistMoves))) then Coalesce ()
+	else*) if (not(isEmptySet(freezeWorkList))) then Freeze ()
+@
